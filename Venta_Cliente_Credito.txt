@@ -1,0 +1,336 @@
+USE CR_ADMIN
+GO
+SET ANSI_NULLS, QUOTED_IDENTIFIER ON
+GO
+-- select * from saacxc where CodClie = '18' order by fechaV desc
+CREATE PROCEDURE [dbo].[Venta_cliente_credito] @CODPRODUC    VARCHAR(50), 
+                                              @CANTIDAD     DECIMAL(28, 4), 
+                                              @NUMEROFAC    VARCHAR(20), 
+                                              @FECHAVENT    DATETIME, 
+                                              @PRECIO       MONEY, 
+                                              @COSTOPROD    DECIMAL(8, 4), 
+                                              @TOTALGENERAL DECIMAL(8, 2), 
+                                              @CODCLIEN     VARCHAR(50),
+											  @CODUBIC      VARCHAR(50),
+											  @Ok			INT OUTPUT
+											  with encryption
+AS 
+    SET TRANSACTION isolation level serializable 
+
+    BEGIN TRANSACTION venta 
+
+    SET dateformat ymd; 
+
+    --CLIENTE CREDITO  
+    DECLARE @EXISTPRD     DECIMAL(28, 4), 
+            @EXISTANT     DECIMAL(28, 4), 
+            @EXISTANTUND  DECIMAL(28, 4), 
+            @IMPUESTOTJT  DECIMAL(28, 3), 
+            @COMISIONTJT  DECIMAL(28, 3), 
+            @RETENCIVATJT DECIMAL(28, 3), 
+            @RETENCIONTJT DECIMAL(28, 3), 
+            @CORRELATIVO  INT, 
+            @LENCORREL    INT, 
+            @NROUNICOFAC  INT, 
+            @NROUNICOLOT  INT, 
+            @NUMERRORS    INT, 
+            @CODSUCURSAL  VARCHAR(50), 
+            @DESCRIPCION  VARCHAR(50), 
+            @CODVEND      VARCHAR(50), 
+            @CODUSUA      VARCHAR(50), 
+            @NROUNICOCXC  INT, 
+            @PROXNUMBER   INT, 
+            @NROUNICO     INT, 
+            @NROUNICOAUD  INT, 
+            @NROREGISERI  INT, 
+            @NROUNICORETI INT, 
+            @NROUNICOREC  INT, 
+            @NROUNICONCR  INT, 
+            @NOMBRE       VARCHAR(50), 
+            @RTN          VARCHAR(50), 
+            @SALDO        DECIMAL(28, 4) 
+
+    SET @LENCORREL=8; 
+    SET @CORRELATIVO=1; 
+    SET @NROUNICOFAC=0; 
+    SET @NUMERRORS=0; 
+    SET @EXISTPRD=0; 
+    SET @CODSUCURSAL = '00000' --Codigo de Sucursal   
+    SET @CODVEND = '13' --codigo vendedor  
+    SET @CODUSUA = 'ADMIN2' --Codigo de usuario SSUSRS 
+
+    --obtener informacion de producto   
+    SELECT @DESCRIPCION = descrip 
+    FROM   saprod 
+    WHERE  codprod = @CODPRODUC 
+
+    --Informacion de cliente  
+    SELECT @NOMBRE = descrip, 
+           @RTN = id3, 
+           @SALDO = saldo 
+    FROM   saclie 
+    WHERE  codclie = @CODCLIEN 
+
+    DECLARE @PERIODO VARCHAR(30); --variable de periodos   
+
+    SET @PERIODO = Concat(Datepart(yyyy, @FECHAVENT), Datepart(mm, @FECHAVENT)) 
+
+    IF NOT EXISTS(SELECT numerod 
+                  FROM   safact WITH (nolock) 
+                  WHERE  ( codsucu = @CODSUCURSAL ) 
+                         AND ( tipofac = 'A' ) 
+                         AND ( numerod = @NUMEROFAC )) 
+      --verificar si correlativo existe   select * from safact where fechaT > getdate()-1
+      BEGIN 
+	  print(1)
+          INSERT INTO safact 
+                      ([codsucu], 
+                       [tipofac], 
+                       [numerod], 
+                       [escorrel], 
+                       [fechat], 
+                       [fechai], 
+                       [fechae], 
+                       [fechav], 
+                       [codusua], 
+                       [codesta], 
+                       [signo], 
+                       [tipotrae], 
+                       [factor], 
+                       [codclie], 
+                       [codvend], 
+                       [codubic], 
+                       [descrip], 
+                       [id3], 
+                       [monto], 
+                       [mtototal], 
+                       [credito], 
+                       [totalprd], 
+                       [texento], 
+                       [saldoact]) 
+          VALUES      (@CODSUCURSAL, 
+                       'A', 
+                       @NUMEROFAC, 
+                       @CORRELATIVO,--variable se pone en 1 si es correlativo   
+                       @FECHAVENT, 
+                       @FECHAVENT, 
+                       @FECHAVENT, 
+                       Cast(@FECHAVENT AS DATE), 
+                       @CODUSUA,--Codigo de usuario SSUSRS   
+                       'SITEMASTER',--nombre de PC     
+                       1, 
+                       1, 
+                       1, 
+                       @CODCLIEN, 
+                       @CODVEND,--Codigo de vendedor SSUSRS   
+                       @CODUBIC,--codubicacion   
+                       @NOMBRE, 
+                       @RTN, 
+                       @TOTALGENERAL,--total general   
+                       @TOTALGENERAL,--total general   
+                       @TOTALGENERAL,--total general   
+                       @TOTALGENERAL,--total general   
+                       @TOTALGENERAL,--total general   
+                       @SALDO) --Saldo Actual  
+
+					   print(2)
+          INSERT INTO saacxc 
+                      ([codclie], 
+                       [numerod], 
+                       [codsucu], 
+                       [codusua], 
+                       [codesta], 
+                       [tipocxc], 
+                       [document], 
+                       [fechat], 
+                       [fechai], 
+                       [fechae], 
+                       [fechav], 
+                       [monto], 
+                       [montoneto], 
+                       [saldo], 
+                       [factor], 
+                       [saldoorg], 
+                       [texento], 
+                       [codvend]) 
+          VALUES      (@CODCLIEN, 
+                       @NUMEROFAC, 
+                       @CODSUCURSAL, 
+                       @CODUSUA, 
+                       'SITEMASTER', 
+                       '10', 
+                       '' + @NUMEROFAC, 
+                       @FECHAVENT, 
+                       @FECHAVENT, 
+                       @FECHAVENT, 
+                       @FECHAVENT, 
+                       @TOTALGENERAL, 
+                       @TOTALGENERAL, 
+                       @TOTALGENERAL, 
+                       1, 
+                       @TOTALGENERAL, 
+                       @TOTALGENERAL, 
+                       @CODVEND) 
+          IF NOT EXISTS(SELECT * 
+                        FROM   saeven WITH (nolock) 
+                        WHERE  ( codvend = @CODVEND ) 
+                               AND ( periodo = @PERIODO )) 
+            BEGIN 
+                INSERT INTO saeven 
+                            ([codvend], 
+                             [periodo]) 
+                VALUES      (@CODVEND, 
+                             @PERIODO) --sumatoria por periodos de cashier   
+            END 
+          UPDATE saeven WITH (rowlock) 
+          SET    [mtoventas] = [mtoventas] + @TOTALGENERAL, 
+                 [costo] = [costo] + ( @CANTIDAD * @COSTOPROD ), 
+                 [mtoingreso] = [mtoingreso] + @TOTALGENERAL, 
+                 [mtocomivta] = [mtocomivta] + 0, 
+                 [mtocomicob] = [mtocomicob] + 0 
+          WHERE  ( codvend = @CODVEND ) 
+                 AND ( periodo = @PERIODO ) 
+          SET @NROUNICOCXC=Ident_current('SAACXC') 
+          SET @NROUNICOFAC=Ident_current('SAFACT') 
+          SET @NUMERRORS=@NUMERRORS + @@ERROR 
+      -- variable de verificacion errores     
+      END 
+    --obtener el ID despues del insert   
+    UPDATE saprod WITH (rowlock) 
+    --actualiza esa fecha en la tabla de los items   
+    SET    fechauv = @FECHAVENT 
+    WHERE  ( codprod = @CODPRODUC ); 
+
+    SET @NUMERRORS=@NUMERRORS + @@ERROR; 
+    --registra suma total de las venta de x producto segun el periodo, año mes.   
+    IF NOT EXISTS(SELECT * 
+                  FROM   saeprd WITH (nolock) 
+                  WHERE  ( codprod = @CODPRODUC ) 
+                         AND ( periodo = @PERIODO )) 
+      BEGIN 
+	  print(8)
+          INSERT INTO saeprd 
+                      -- si aun no esta el row insertado para este item y periodo lo inserta   
+                      ([codprod], 
+                       [periodo]) 
+          VALUES      (@CODPRODUC, 
+                       @PERIODO) 
+      END 
+    --MODIFICADO  
+    UPDATE saeprd WITH (rowlock) 
+    SET    [mtoventas] = [mtoventas] + ( @PRECIO * @CANTIDAD ),--precio total   
+           [cntventas] = [cntventas] + @CANTIDAD,--cantidad   
+           [costo] = [costo] + ( @COSTOPROD * @CANTIDAD ) --costo total   
+    WHERE  ( codprod = @CODPRODUC ) 
+           AND ( periodo = @PERIODO ); -- actualiza la informacion de ventas   
+    SET @NUMERRORS=@NUMERRORS + @@ERROR; 
+    SET @EXISTANT=0; 
+    SET @EXISTANTUND=0; 
+    --tablas de existencia   
+    SELECT @EXISTANT = existen, 
+           @EXISTANTUND = exunidad 
+    FROM   saexis WITH (nolock) 
+    WHERE  codprod = @CODPRODUC --codigo   
+           AND codubic = @CODUBIC; 
+    DECLARE @CANTIDADREBAJA DECIMAL(28, 4) = @COSTOPROD * -1 
+
+    --varialbe solo usada para el SP Siguiente   
+    EXEC Tr_adm_update_existencias --rebaja inventarios   
+      @CODPRODUC,--codigo   
+      @CODUBIC,--sucursal   
+      @CANTIDADREBAJA,--cantidad    
+      0,--0= unidad   
+      @FECHAVENT; --fecha   
+    SET @EXISTPRD=(SELECT Isnull(Sum(E.existen), 0) 
+                   FROM   saexis E WITH (nolock) 
+                   WHERE  ( E.codprod = @CODPRODUC )--codigo    
+                          AND ( E.codubic = @CODUBIC ) --sucursal   
+                   GROUP  BY E.codprod, 
+                             E.codubic); 
+/*
+SELECT Isnull(Sum(E.existen), 0) , E.codubic
+                   FROM   saexis E WITH (nolock) 
+                   WHERE  ( E.codprod = '29' )--codigo    
+                         -- AND ( E.codubic = '1' ) --sucursal   
+                   GROUP  BY E.codprod, 
+                             E.codubic
+*/
+    IF @EXISTPRD < 0 
+      SET @NUMERRORS=1000; 
+
+    DECLARE @NROLINEA AS INT 
+    SELECT @NROLINEA = Isnull(Max(nrolinea + 1), 1) 
+    FROM   saitemfac 
+    WHERE  numerod = @NUMEROFAC 
+           AND [codsucu] = @CODSUCURSAL  
+    INSERT INTO saitemfac 
+                ([codsucu], 
+                 [tipofac], 
+                 [numerod], 
+                 [nrolinea], 
+                 [signo], 
+                 [fechae], 
+                 [coditem], 
+                 [refere], 
+                 [codubic], 
+                 [descrip1], 
+                 [cantidad], 
+                 [cantmayor], 
+                 [costo], 
+                 [totalitem], 
+                 [precio], 
+                 [priceo], 
+                 [codvend], 
+                 [esexento], 
+                 [nrounicol], 
+                 [existantu], 
+                 [existant]) 
+    VALUES      (@CODSUCURSAL, 
+                 'A', 
+                 @NUMEROFAC, 
+                 @NROLINEA, 
+                 1, 
+                 @FECHAVENT, 
+                 @CODPRODUC, 
+                 @CODPRODUC, 
+                 @CODUBIC, 
+                 @DESCRIPCION, 
+                 @CANTIDAD,--cantidad litros   
+                 1, 
+                 @COSTOPROD,--costo item   
+                 @TOTALGENERAL,--total general   
+                 @PRECIO,--precio venta   
+                 @PRECIO,--precio venta   
+                 @CODVEND,--cajero id   
+                 1,--excento impuestos   
+                 Isnull(@NROUNICOLOT, 0),--todas estan en 0   
+                 Isnull(@EXISTANTUND, 0), 
+                 Isnull(@EXISTANT, 0)); 
+    SET @NUMERRORS=@NUMERRORS + @@ERROR; 
+
+    --MODIFICADO  
+    UPDATE safact 
+    SET    costoprd = costoprd + ( @COSTOPROD * @CANTIDAD ),--costo total   
+           costosrv = 0, 
+           mtocomivta = 0, 
+           mtocomivtad = 0, 
+           mtocomicob = 0, 
+           mtocomicobd = 0 
+    WHERE  ( codsucu = @CODSUCURSAL ) 
+           AND ( tipofac = 'A' ) 
+           AND ( numerod = @NUMEROFAC ); 
+    UPDATE savend WITH (rowlock) 
+    SET    fechauv = @FECHAVENT 
+    WHERE  ( codvend = @CODVEND ); --tabla de cashier   
+    SET @NUMERRORS=@NUMERRORS + @@ERROR; 
+    IF @NUMERRORS > 0 
+	BEGIN
+	SET @Ok = 1
+      ROLLBACK TRANSACTION venta; 
+	END
+    ELSE 
+	BEGIN
+      COMMIT TRANSACTION venta; 
+	  SET @OK = 0
+	END
+GO

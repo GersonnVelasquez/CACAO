@@ -1,0 +1,228 @@
+USE [CR_ADMIN]
+GO
+/****** Object:  StoredProcedure [dbo].[Migracion_Facturas]    Script Date: 17/12/2018 10:58:08 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+    
+         
+--exec    [dbo].[Migracion_Facturas]       
+ALTER PROCEDURE [dbo].[Migracion_Facturas]       
+AS       
+  BEGIN try       
+      -- Buscar la ultima transaccion migrada.              
+      DECLARE @ULTIMAMIGRACION AS INT;       
+      DECLARE @ACTUAL AS INT;       
+   DECLARE @TURNO_CAJA AS INT;      
+      
+      SELECT @ACTUAL = Max(id)       
+      FROM   migracion_log     
+   where sucursal = 2      
+      
+      SELECT @ULTIMAMIGRACION = id_transaction,      
+    @TURNO_CAJA = Turno_Caja      
+      FROM   migracion_log       
+      WHERE  id = @ACTUAL  and sucursal = 2      
+      
+      -- Variables Datos Necesarios                 
+      DECLARE @CODPRODUC      VARCHAR(50),       
+              @CANTIDAD       DECIMAL(28, 4),       
+              @TIPOPAGO       VARCHAR(50),       
+              @NUMEROFAC      VARCHAR(20),       
+              @FECHAVENT      DATETIME,       
+              @PRECIO         MONEY,       
+              @COSTOPROD      DECIMAL(8, 4),       
+              @TOTALGENERAL   DECIMAL(8, 2),       
+              @Id_Transaction INT,       
+              @Cliente        INT,       
+              @ClienteCode    VARCHAR(50),       
+              @Nombre         VARCHAR(50),       
+              @RTN            VARCHAR(50),       
+              @OK             INT,      
+     @TIPOFAC        VARCHAR(50),      
+     @TURNO    INT      
+      -- Obtener informacion y habilitar cursor.             
+      DECLARE transaction_cursor CURSOR FOR       
+        SELECT CASE       
+                 WHEN TD.descr_articulo = 'GAS. SUPER' THEN '27'       
+                 WHEN TD.descr_articulo = 'DIESEL' THEN '29'       
+                 WHEN TD.descr_articulo = 'GAS. REGULAR' THEN '28'       
+               END                                          AS CODPRODUC,       
+               TD.cantidad                                  AS CANTIDAD,       
+               CASE       
+                 WHEN fp.forma_pago = 51 THEN '02'       
+                 WHEN fp.forma_pago = 1 THEN '03'       
+               END                                          AS TIPOPAGO,       
+               T.nro_comprobante                            AS NUMEROFAC,       
+               dbo.Dateconcat(T.fecha, Cast(T.hora AS INT)) AS FECHAVENT,       
+               TD.precio_unit_original                      AS PRECIO,       
+               CASE       
+                 WHEN TD.descr_articulo = 'GAS. SUPER' THEN 24.3214       
+                 WHEN TD.descr_articulo = 'DIESEL' THEN 21.4631       
+                 WHEN TD.descr_articulo = 'GAS. REGULAR' THEN 22.0321       
+               END                                          AS COSTOPROD,       
+               T.monto_total                                AS TOTALGENERAL,       
+               T.transaccion                                AS Id_Transaction,       
+               T.cliente                                    AS Cliente,       
+               C.comentario                                 AS ClienteCode,       
+               T.razon_social                               AS NOMBRE,       
+               Isnull(T.nro_cui, 99999999)                  AS RTN,      
+      T.operacion         AS OPERACION,      
+      T.Turno_Caja         AS TURNO            
+        FROM   [26.24.1.61].[zeus].[dbo].rtl_transaccion T       
+               INNER JOIN [26.24.1.61].[zeus].[dbo].rtl_trans_detalle TD       
+                       ON T.transaccion = TD.transaccion       
+               INNER JOIN [26.24.1.61].[zeus].[dbo].rtl_trans_pagos tp       
+                       ON t.transaccion = tp.transaccion       
+               INNER JOIN [26.24.1.61].[zeus].[dbo].rtl_forma_pago fp       
+                       ON tp.forma_pago = fp.forma_pago       
+               LEFT JOIN [26.24.1.61].[zeus].[dbo].rtl_cliente C       
+                      ON T.cliente = C.cliente       
+               LEFT JOIN [26.24.1.61].[zeus].[dbo].per_persona P       
+                      ON C.id_persona = P.persona       
+        --WHERE  T.transaccion > Isnull(@ULTIMAMIGRACION, 1)            
+        WHERE  t.turno_caja > @TURNO_CAJA and      
+                --t.cliente > 1    
+				  (t.tipo_comprobante='FACTURA'  and t.operacion = 'Venta')     or
+				   (
+                t.operacion = 'FactRemito'      
+      AND t.tipo_comprobante='FACTURA' )     
+        ORDER  BY T.transaccion     
+
+      --Inserta un nuevo log con la ultima factura ingresada y guarda el ID del row nuevo.           
+      INSERT INTO migracion_log       
+                  (fecha,       
+                   id_transaction,      
+       turno_caja,     
+       sucursal)       
+      VALUES      (Getdate(),       
+                   @ULTIMAMIGRACION,      
+       @TURNO_CAJA,     
+       2)       
+      
+      SELECT @ACTUAL = Max(id)       
+      FROM   migracion_log       
+   WHERE sucursal = 2     
+      --Inicia Cursor           
+      OPEN transaction_cursor;       
+      
+      -- Guardar Datos en variables              
+      FETCH next FROM transaction_cursor INTO @CODPRODUC, @CANTIDAD, @TIPOPAGO,       
+      @NUMEROFAC, @FECHAVENT, @PRECIO, @COSTOPROD, @TOTALGENERAL,       
+      @Id_Transaction,       
+      @Cliente, @ClienteCode, @Nombre, @RTN ,@TIPOFAC,@TURNO      
+      
+      WHILE @@FETCH_STATUS = 0       
+        BEGIN       
+            IF( @Cliente = 1 )       
+              BEGIN       
+                  EXEC Venta_consumidor_final       
+                    @CODPRODUC,       
+                    @CANTIDAD,       
+                    @TIPOPAGO,       
+                    @NUMEROFAC,       
+                    @FECHAVENT,       
+                    @PRECIO,       
+                    @COSTOPROD,       
+                    @TOTALGENERAL,       
+                    @Nombre,       
+                    @RTN,        
+					'002',       
+                    @OK = @OK output
+      
+      --Actualiza el log con la ultima factura ingresada.           
+       UPDATE migracion_log       
+       SET    id_transaction = @Id_Transaction,       
+           totalfacturas = totalfacturas + 1       
+       WHERE  id = @ACTUAL       
+   AND  sucursal = 2    
+      
+                  SELECT @OK       
+              END       
+            ELSE IF( @Cliente = -1 )       
+              BEGIN       
+                  EXEC Venta_consumidor_final       
+                    @CODPRODUC,       
+                    @CANTIDAD,       
+                    @TIPOPAGO,       
+                    @NUMEROFAC,       
+                    @FECHAVENT,       
+                    @PRECIO,       
+                    @COSTOPROD,       
+                    @TOTALGENERAL,       
+                    @Nombre,       
+                    @RTN,      
+					'002',       
+                    @OK = @OK output
+      
+      --Actualiza el log con la ultima factura ingresada.           
+       UPDATE migracion_log       
+       SET    id_transaction = @Id_Transaction,       
+           totalfacturas = totalfacturas + 1       
+       WHERE  id = @ACTUAL       
+   AND  sucursal = 2    
+      
+                  SELECT @OK       
+              END       
+            ELSE       
+              BEGIN       
+                  IF ( @ClienteCode IS NOT NULL AND @TIPOFAC='FactRemito')       
+                    BEGIN       
+                        EXEC Venta_cliente_credito       
+                          @CODPRODUC,       
+                          @CANTIDAD,       
+                          @NUMEROFAC,       
+                          @FECHAVENT,       
+                          @PRECIO,       
+                          @COSTOPROD,       
+                          @TOTALGENERAL,       
+                          @ClienteCode,      
+						  '002',       
+                          @OK = @OK output
+      
+         --Actualiza el log con la ultima factura ingresada.           
+       UPDATE migracion_log       
+       SET    id_transaction = @Id_Transaction,       
+           totalfacturas = totalfacturas + 1,      
+           turno_caja = @TURNO      
+       WHERE  id = @ACTUAL       
+   AND sucursal = 2    
+                        SELECT @OK       
+                    END       
+                  ELSE IF(@ClienteCode IS NULL AND @TIPOFAC='FactRemito')      
+     BEGIN       
+      SELECT 'Null cliente'       
+      
+      UPDATE migracion_log       
+      SET    comentarios =       
+          'Factura no ingresada por cliente sin codigo, Numero: '       
+          + @NUMEROFAC       
+      WHERE  id = @ACTUAL     
+  AND sucursal = 2      
+     END       
+              END       
+      
+                 
+      
+            -- Guardar Datos en variables              
+   FETCH next FROM transaction_cursor INTO @CODPRODUC, @CANTIDAD,       
+            @TIPOPAGO,       
+            @NUMEROFAC, @FECHAVENT, @PRECIO, @COSTOPROD, @TOTALGENERAL,       
+            @Id_Transaction,       
+            @Cliente, @ClienteCode, @Nombre, @RTN ,@TIPOFAC,@TURNO      
+        END       
+      
+      CLOSE transaction_cursor;       
+      
+      DEALLOCATE transaction_cursor;       
+  END try       
+      
+  BEGIN catch       
+      CLOSE transaction_cursor;       
+      
+      DEALLOCATE transaction_cursor;       
+      
+      SELECT Error_number()  AS ErrorNumber,       
+             Error_message() AS ErrorMessage;       
+  END catch 
